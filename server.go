@@ -100,6 +100,8 @@ type Server struct {
 	BatchDeleteMaxMessages int
 	DeletionInterval       time.Duration
 
+	HandlerContext context.Context
+
 	Logger    Logger
 	Processor Processor
 
@@ -135,6 +137,7 @@ func ServerDefaults(s *Server) {
 	s.DeletionInterval = DefaultDeletionInterval
 	s.Logger = &discardLogger{}
 	s.Processor = &BoundedProcessor{s}
+	s.HandlerContext = context.Background()
 }
 
 func DefaultClient(s *Server) {
@@ -234,6 +237,7 @@ func (c *Server) startReceiver() {
 				// WaitTimeSeconds to original value.
 				for _, message := range out.Messages {
 					m := NewMessage(c.QueueURL, message, c.Client)
+					m.ctx = c.HandlerContext
 					c.Logger.Println(fmt.Sprintf("adding message to the messages channel: %s", aws.StringValue(m.SQSMessage.ReceiptHandle)))
 					c.messagesCh <- m // this will block if Subscribers are not ready to receive
 				}
