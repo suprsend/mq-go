@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/aws/aws-sdk-go/service/sqs/sqsiface"
@@ -192,16 +194,38 @@ func (c *Server) Start() {
 	go c.startDeleter()
 }
 
+func isAwsContextCancel(err error) bool {
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok && aerr.Code() == request.CanceledErrorCode {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Server) startReceiver() {
+	cctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		<-c.shutdown
+		cancel()
+	}()
+
 	for {
 		select {
-		case <-c.shutdown:
+		case <-cctx.Done():
 			c.Logger.Println("received shutdown signal, closing messages channel")
 			close(c.messagesCh)
 			return
 		default:
-			out, err := c.receiveMessage()
+			out, err := c.receiveMessage(cctx)
 			if err != nil {
+				if isAwsContextCancel(err) {
+					// the next loop will hit the shutdown case
+					continue
+				}
+
 				c.ErrorHandler(err)
 				time.Sleep(1 * time.Second)
 			} else {
@@ -302,8 +326,8 @@ func (c *Server) Shutdown(ctx context.Context) error {
 	}
 }
 
-func (c *Server) receiveMessage() (*sqs.ReceiveMessageOutput, error) {
-	return c.Client.ReceiveMessage(&sqs.ReceiveMessageInput{
+func (c *Server) receiveMessage(ctx context.Context) (*sqs.ReceiveMessageOutput, error) {
+	return c.Client.ReceiveMessageWithContext(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:              aws.String(c.QueueURL),
 		AttributeNames:        c.AttributeNames,
 		MessageAttributeNames: c.MessageAttributeNames,
