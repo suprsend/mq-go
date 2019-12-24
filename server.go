@@ -114,7 +114,7 @@ type Server struct {
 
 // ServerDefaults is used by NewServer to initialize a Server with defaults.
 func ServerDefaults(s *Server) {
-	s.Client = sqs.New(session.New())
+	s.Client = nil
 	s.Concurrency = DefaultConcurrency
 	s.ErrorHandler = func(err error) {
 		fmt.Fprintln(os.Stderr, err.Error())
@@ -133,6 +133,12 @@ func ServerDefaults(s *Server) {
 	s.DeletionInterval = DefaultDeletionInterval
 	s.Logger = &discardLogger{}
 	s.Processor = &BoundedProcessor{s}
+}
+
+func DefaultClient(s *Server) {
+	if s.Client == nil {
+		s.Client = sqs.New(session.New())
+	}
 }
 
 // WithClient configures a Server with a custom sqs Client.
@@ -165,6 +171,7 @@ func NewServer(queueURL string, h Handler, opts ...func(*Server)) *Server {
 	for _, opt := range opts {
 		opt(s)
 	}
+	opts = append(opts, DefaultClient)
 
 	s.messagesCh = make(chan *Message)
 	s.deletionsCh = make(chan *Message, s.BatchDeleteMaxMessages)
